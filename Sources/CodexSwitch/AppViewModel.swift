@@ -133,11 +133,15 @@ final class AppViewModel: ObservableObject {
     }
 
     func switchToSelectedProfile() {
-        let targetID = selectedProfileID
+        switchToProfile(id: selectedProfileID)
+    }
+
+    func switchToProfile(id targetID: String) {
         guard profiles.contains(where: { $0.id == targetID }) else {
             return
         }
 
+        selectedProfileID = targetID
         isBusy = true
         statusMessage = "切换中..."
         do {
@@ -164,6 +168,10 @@ final class AppViewModel: ObservableObject {
 
     var selectedProfile: CodexProfile? {
         profiles.first { $0.id == selectedProfileID }
+    }
+
+    var currentProfileName: String {
+        profiles.first { $0.id == currentProfileID }?.name ?? "未知配置"
     }
 
     private func makeUniqueID(from name: String) -> String {
