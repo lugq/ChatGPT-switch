@@ -71,12 +71,7 @@ public final class SwitchService {
     }
 
     private func switchToDefault() throws {
-        let defaultKey = CodexProfile.defaultProfile().secretKey
-        let snapshot = try secretStore.data(forKey: defaultKey) ?? currentAuthData()
-        guard let snapshot else {
-            throw SwitchServiceError.missingDefaultSnapshot
-        }
-
+        let snapshot = try defaultAuthSnapshot()
         try write(snapshot, to: codexPaths.authFile)
         try CodexConfigEditor(configFile: codexPaths.configFile, fileManager: fileManager).apply(baseURL: nil)
     }
@@ -94,10 +89,61 @@ public final class SwitchService {
     }
 
     private func captureOutgoingDefaultSnapshotIfNeeded(currentProfileID: String) throws {
-        guard currentProfileID == "default", let data = currentAuthData() else {
+        guard currentProfileID == "default",
+              let data = currentAuthData(),
+              isChatGPTAuth(data) else {
             return
         }
+        try write(data, to: defaultSnapshotFile)
         try secretStore.setData(data, forKey: CodexProfile.defaultProfile().secretKey)
+    }
+
+    private var defaultSnapshotFile: URL {
+        appDataDirectory.appendingPathComponent("default-auth.json")
+    }
+
+    private func defaultAuthSnapshot() throws -> Data {
+        let defaultKey = CodexProfile.defaultProfile().secretKey
+        let candidates = [
+            try? secretStore.data(forKey: defaultKey),
+            readIfExists(defaultSnapshotFile),
+            latestChatGPTBackup(),
+            currentAuthData()
+        ].compactMap { $0 }
+
+        guard let snapshot = candidates.first(where: isChatGPTAuth) else {
+            throw SwitchServiceError.missingDefaultSnapshot
+        }
+        return snapshot
+    }
+
+    private func latestChatGPTBackup() -> Data? {
+        let backupDirectory = appDataDirectory.appendingPathComponent("backups")
+        let directories = (try? fileManager.contentsOfDirectory(
+            at: backupDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        let sortedDirectories = directories.sorted {
+            modificationDate(for: $0) > modificationDate(for: $1)
+        }
+        return sortedDirectories
+            .compactMap { readIfExists($0.appendingPathComponent("auth.json")) }
+            .first(where: isChatGPTAuth)
+    }
+
+    private func modificationDate(for file: URL) -> Date {
+        let attributes = try? fileManager.attributesOfItem(atPath: file.path)
+        return (attributes?[.modificationDate] as? Date) ?? .distantPast
+    }
+
+    private func isChatGPTAuth(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let authMode = object["auth_mode"] as? String else {
+            return false
+        }
+        return authMode == "chatgpt"
     }
 
     private func currentAuthData() -> Data? {
@@ -164,4 +210,3 @@ private struct FileBackup {
     var authData: Data?
     var configData: Data?
 }
-

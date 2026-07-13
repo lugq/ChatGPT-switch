@@ -74,6 +74,38 @@ final class SwitchServiceTests: XCTestCase {
         XCTAssertFalse(config.contains("openai_base_url"))
         XCTAssertEqual(try fixture.profileStore.load().currentProfileID, "default")
     }
+
+    func testSwitchingToDefaultUsesChatGPTBackupWhenKeychainSnapshotIsMissing() throws {
+        let fixture = try Fixture()
+        let profile = CodexProfile(
+            id: "codex-plus",
+            name: "Codex-Plus",
+            kind: .openAICompatible,
+            baseURL: URL(string: "https://hk.rootflowai.com/v1")!,
+            iconName: "sparkle"
+        )
+        try fixture.profileStore.save(ProfileState(currentProfileID: "codex-plus", profiles: [.defaultProfile(), profile]))
+        try Data(#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-custom"}"#.utf8).write(to: fixture.paths.authFile)
+        try "openai_base_url = \"https://hk.rootflowai.com/v1\"\n".write(
+            to: fixture.paths.configFile,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let backupDirectory = fixture.appData
+            .appendingPathComponent("backups")
+            .appendingPathComponent("known-default")
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        try Data(#"{"auth_mode":"chatgpt","tokens":{"access_token":"from-backup"}}"#.utf8)
+            .write(to: backupDirectory.appendingPathComponent("auth.json"))
+
+        try fixture.service.switchToProfile(id: "default")
+
+        let auth = try String(contentsOf: fixture.paths.authFile, encoding: .utf8)
+        let config = try String(contentsOf: fixture.paths.configFile, encoding: .utf8)
+        XCTAssertTrue(auth.contains(#""auth_mode":"chatgpt""#))
+        XCTAssertFalse(config.contains("openai_base_url"))
+    }
 }
 
 private final class FakeCodexCLI: CodexCLI {
@@ -139,4 +171,3 @@ private struct Fixture {
         ]
     }
 }
-
